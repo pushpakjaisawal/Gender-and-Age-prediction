@@ -41,9 +41,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-st.title("👤 Age & Gender Prediction")
-st.markdown("Upload an image or use your **webcam** for live prediction.")
-
 # ===============================
 # AGE LABELS (must match training)
 # ===============================
@@ -160,12 +157,37 @@ def load_model_once():
         raise
 
 
-with st.spinner("Loading model..."):
-    model = load_model_once()
-    face_cascade = cv2.CascadeClassifier(
-        cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+# ===============================
+# WELCOME SCREEN (shown while model loads)
+# ===============================
+col_welcome1, col_welcome2 = st.columns([1, 3])
+with col_welcome1:
+    st.markdown("### 👤")
+with col_welcome2:
+    st.markdown("# Age & Gender Prediction")
+    st.markdown(
+        "Upload an image or use your **webcam** for live prediction.\n\n"
+        "_Powered by MobileNetV2 trained on UTKFace dataset._"
     )
-st.success("Model loaded successfully! ✅")
+st.markdown("---")
+
+progress_text = "Initializing TensorFlow and loading model. This may take 30-60 seconds on first visit (cold start)…"
+progress_bar = st.progress(0, text=progress_text)
+
+progress_bar.progress(20, text="Loading TensorFlow libraries…")
+model = load_model_once()
+
+progress_bar.progress(80, text="Loading face detector…")
+face_cascade = cv2.CascadeClassifier(
+    cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+)
+
+progress_bar.progress(100, text="Ready!")
+st.toast("Model loaded successfully!", icon="✅")
+
+import time
+time.sleep(0.3)
+progress_bar.empty()
 
 # ===============================
 # PREDICTION FUNCTION
