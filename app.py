@@ -17,6 +17,12 @@ Dependencies:
     - streamlit-webrtc (live webcam support)
 """
 
+import os
+# Disable GPU/CUDA before TensorFlow is imported.
+# Streamlit Cloud has no GPU — CUDA init causes Segmentation fault.
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+
 import streamlit as st
 import cv2
 import numpy as np
