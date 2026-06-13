@@ -317,6 +317,14 @@ with tab2:
     try:
         from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
         import av
+        import traceback
+
+        # Verify cascade loaded correctly
+        if face_cascade.empty():
+            st.error(
+                "⚠️ Haar cascade classifier failed to load. "
+                "Face detection will not work on webcam."
+            )
 
         class FaceDetector(VideoProcessorBase):
             """Real-time face detection and age/gender prediction processor.
@@ -328,17 +336,22 @@ with tab2:
             Attributes:
                 _lock: Threading lock to prevent concurrent prediction calls
                     on the shared Keras model.
+                _cascade: Reference to the Haar cascade classifier.
+                _model: Reference to the loaded Keras model.
             """
 
             def __init__(self):
-                """Initialize the processor with a threading lock."""
+                """Initialize the processor with model and cascade references."""
                 self._lock = threading.Lock()
+                self._cascade = face_cascade
+                self._model = model
 
             def recv(self, frame):
                 """Process a single video frame from the webcam stream.
 
                 Converts the frame from BGR to a NumPy array, runs face
                 detection and prediction, and returns an annotated RGB frame.
+                Errors are caught silently to prevent webcam crashes.
 
                 Args:
                     frame: WebRTC video frame object from streamlit-webrtc.
@@ -346,9 +359,40 @@ with tab2:
                 Returns:
                     av.VideoFrame: Annotated frame in RGB24 format.
                 """
-                img = frame.to_ndarray(format="bgr24")
-                result = process_frame(img)
-                return av.VideoFrame.from_ndarray(result, format="rgb24")
+                try:
+                    img = frame.to_ndarray(format="bgr24")
+
+                    # BGR → RGB for display, BGR → Gray for detection
+                    rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+                    # Detect faces (lowered minNeighbors for better detection)
+                    faces = self._cascade.detectMultiScale(
+                        gray, scaleFactor=1.2, minNeighbors=3, minSize=(50, 50)
+                    )
+
+                    for (x, y, w, h) in faces:
+                        face = rgb[y:y+h, x:x+w]
+
+                        # Run prediction inside lock (thread-safe)
+                        with self._lock:
+                            gender, g_conf, age_group, a_conf = predict_face(face)
+
+                        label = f"{gender} ({g_conf:.0%}), {age_group} ({a_conf:.0%})"
+
+                        # Draw bounding box
+                        cv2.rectangle(rgb, (x, y), (x+w, y+h), (0, 255, 0), 2)
+                        cv2.rectangle(rgb, (x, y-30), (x+w, y), (0, 255, 0), -1)
+                        cv2.putText(rgb, label, (x, y-8),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 2)
+
+                    return av.VideoFrame.from_ndarray(rgb, format="rgb24")
+
+                except Exception as e:
+                    # Don't crash webcam on errors — return raw frame
+                    traceback.print_exc()
+                    img = frame.to_ndarray(format="bgr24")
+                    return av.VideoFrame.from_ndarray(img, format="bgr24")
 
         webrtc_ctx = webrtc_streamer(
             key="age-gender-detection",
@@ -363,7 +407,7 @@ with tab2:
         )
 
         if webrtc_ctx.state.playing:
-            st.info("🔥 Webcam is active! Detection running...")
+            st.success("✅ Webcam is active! Face detection running...")
 
     except ImportError:
         st.error(
