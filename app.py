@@ -266,7 +266,7 @@ def process_frame(frame: np.ndarray) -> np.ndarray:
 # ===============================
 # TAB 1: IMAGE UPLOAD
 # ===============================
-tab1, tab2 = st.tabs(["📷 Upload Image", "🎥 Live Webcam"])
+tab1, tab2 = st.tabs(["📁 Upload Image", "📷 Camera Snapshot"])
 
 with tab1:
     st.header("Upload an Image")
@@ -305,135 +305,44 @@ with tab1:
 
 
 # ===============================
-# TAB 2: LIVE WEBCAM (streamlit-webrtc)
+# TAB 2: CAMERA SNAPSHOT (reliable on Streamlit Cloud)
 # ===============================
 with tab2:
-    st.header("Live Webcam Prediction")
-    st.warning(
-        "Click **Start** to begin webcam detection. "
-        "Click **Stop** to end the session."
+    st.header("📷 Camera Snapshot")
+    st.markdown(
+        "Take a photo using your webcam and get instant prediction. "
+        "Click **Take Photo** to capture, then results appear below."
     )
 
-    try:
-        from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
-        import av
-        import traceback
+    camera_photo = st.camera_input("Take a photo", key="camera")
 
-        # Verify cascade loaded correctly
-        if face_cascade.empty():
-            st.error(
-                "⚠️ Haar cascade classifier failed to load. "
-                "Face detection will not work on webcam."
-            )
+    if camera_photo is not None:
+        # Decode the captured photo
+        file_bytes = np.asarray(bytearray(camera_photo.read()), dtype=np.uint8)
+        img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-        class FaceDetector(VideoProcessorBase):
-            """Real-time face detection and age/gender prediction processor.
+        # Process
+        result = process_frame(img)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        faces = face_cascade.detectMultiScale(gray, 1.2, 3)
 
-            Subclasses ``VideoProcessorBase`` from *streamlit-webrtc* to
-            receive each video frame, run face detection and prediction,
-            and return the annotated frame for display.
+        st.image(result, use_container_width=True)
 
-            Attributes:
-                _lock: Threading lock to prevent concurrent prediction calls
-                    on the shared Keras model.
-                _cascade: Reference to the Haar cascade classifier.
-                _model: Reference to the loaded Keras model.
-            """
-
-            def __init__(self):
-                """Initialize the processor with model and cascade references."""
-                self._lock = threading.Lock()
-                self._cascade = face_cascade
-                self._model = model
-
-            def recv(self, frame):
-                """Process a single video frame from the webcam stream.
-
-                Converts the frame from BGR to a NumPy array, runs face
-                detection and prediction, and returns an annotated RGB frame.
-                Errors are caught silently to prevent webcam crashes.
-
-                Args:
-                    frame: WebRTC video frame object from streamlit-webrtc.
-
-                Returns:
-                    av.VideoFrame: Annotated frame in RGB24 format.
-                """
-                try:
-                    img = frame.to_ndarray(format="bgr24")
-
-                    # BGR → RGB for display, BGR → Gray for detection
-                    rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-                    # Detect faces (lowered minNeighbors for better detection)
-                    faces = self._cascade.detectMultiScale(
-                        gray, scaleFactor=1.2, minNeighbors=3, minSize=(50, 50)
-                    )
-
-                    for (x, y, w, h) in faces:
-                        face = rgb[y:y+h, x:x+w]
-
-                        # Run prediction inside lock (thread-safe)
-                        with self._lock:
-                            gender, g_conf, age_group, a_conf = predict_face(face)
-
-                        label = f"{gender} ({g_conf:.0%}), {age_group} ({a_conf:.0%})"
-
-                        # Draw bounding box
-                        cv2.rectangle(rgb, (x, y), (x+w, y+h), (0, 255, 0), 2)
-                        cv2.rectangle(rgb, (x, y-30), (x+w, y), (0, 255, 0), -1)
-                        cv2.putText(rgb, label, (x, y-8),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 2)
-
-                    return av.VideoFrame.from_ndarray(rgb, format="rgb24")
-
-                except Exception as e:
-                    # Don't crash webcam on errors — return raw frame
-                    traceback.print_exc()
-                    img = frame.to_ndarray(format="bgr24")
-                    return av.VideoFrame.from_ndarray(img, format="bgr24")
-
-        webrtc_ctx = webrtc_streamer(
-            key="age-gender-detection",
-            video_processor_factory=FaceDetector,
-            rtc_configuration={
-                "iceServers": [
-                    # Google STUN servers (for direct connection)
-                    {"urls": ["stun:stun.l.google.com:19302"]},
-                    {"urls": ["stun:stun1.l.google.com:19302"]},
-                    {"urls": ["stun:stun2.l.google.com:19302"]},
-                    # Free TURN servers (fallback when STUN fails)
-                    {
-                        "urls": [
-                            "turn:openrelay.metered.ca:80",
-                            "turn:openrelay.metered.ca:443",
-                            "turn:openrelay.metered.ca:443?transport=tcp"
-                        ],
-                        "username": "openrelayproject",
-                        "credential": "openrelayproject"
-                    },
-                ]
-            },
-            media_stream_constraints={
-                "video": True,
-                "audio": False,
-            },
-        )
-
-        if webrtc_ctx.state.playing:
-            st.success("✅ Webcam is active! Face detection running...")
-
-    except ImportError:
-        st.error(
-            "**streamlit-webrtc** is not installed. "
-            "Webcam mode only works when deployed on Streamlit Cloud or local server.\n\n"
-            "Install it with: `pip install streamlit-webrtc`"
-        )
-        st.info(
-            "💡 **Tip:** Use **Upload Image** tab above for now, "
-            "or deploy this app to Streamlit Cloud for full webcam support."
-        )
+        if len(faces) > 0:
+            st.markdown(f"### Detected {len(faces)} face(s)")
+            for i, (x, y, w, h) in enumerate(faces):
+                face = img_rgb[y:y+h, x:x+w]
+                gender, g_conf, age_group, a_conf = predict_face(face)
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Gender", gender, delta=f"{g_conf:.0%} confidence")
+                with col2:
+                    st.metric("Age Group", age_group, delta=f"{a_conf:.0%} confidence")
+                with col3:
+                    st.image(face, width=100)
+        else:
+            st.warning("No faces detected. Try again with better lighting.")
 
 
 # ===============================
