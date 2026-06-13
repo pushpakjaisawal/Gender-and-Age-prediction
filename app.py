@@ -148,9 +148,7 @@ def load_model_once():
     except (TypeError, KeyError) as e:
         error_msg = str(e)
         if "quantization_config" in error_msg or "Unrecognized keyword" in error_msg:
-            st.warning(
-                "Patching model file for Keras compatibility…"
-            )
+            # Patch silently — no warning needed, just fix and reload
             _strip_quantization_config(model_path)
             model = load_model(model_path)
             return model
@@ -318,6 +316,7 @@ with tab2:
 
     try:
         from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
+        import av
 
         class FaceDetector(VideoProcessorBase):
             """Real-time face detection and age/gender prediction processor.
